@@ -41,9 +41,11 @@ the dashboard once you authenticate with a GitHub account that belongs to
 4. Copy the client id + secret into `AUTH_GITHUB_ID` / `AUTH_GITHUB_SECRET`.
 5. Generate `AUTH_SECRET` with `openssl rand -base64 32`.
 
-The OAuth scope `read:org` is requested so the app can verify the signed-in
-user is a member of `ALLOWED_GITHUB_ORG`. Users who aren't members land on
-`/unauthorized`.
+The OAuth scopes requested are `read:org read:user user:email repo`.
+`read:org` is used to verify the signed-in user is a member of
+`ALLOWED_GITHUB_ORG` — non-members land on `/unauthorized`. `repo` is used to
+read PRs, commits, and workflow runs from the tracked repo (required when it's
+private; harmless for public repos).
 
 ## Deploy on Vercel
 
@@ -51,18 +53,29 @@ user is a member of `ALLOWED_GITHUB_ORG`. Users who aren't members land on
 2. Set the same env vars from `.env.example` in the Vercel project settings.
 3. Deploy.
 
-## Switching from mock to live data
+## Data sources
 
-The data layer is split behind interfaces in `src/lib/data/`:
+Set `DATA_SOURCE=mock` (default) for a fully seeded, network-free dashboard —
+useful for local UI work.
 
-- `mock.ts` — current implementation, deterministic seeded data.
-- `github.ts` — TODO: fetch open PRs, recent main commits, in-flight workflow runs.
-- `appstore.ts` — TODO: fetch TestFlight builds + App Store version states from
-  App Store Connect.
-- `googleplay.ts` — TODO: fetch Play Console tracks + rollout fractions.
+Set `DATA_SOURCE=live` to fetch the **Source lane** (Open PR / Merged /
+Building) from GitHub using the signed-in user's OAuth token:
 
-Set `DATA_SOURCE=live` and implement the three adapters; `getPipeline()` in
-`src/lib/data/index.ts` is the single composition point.
+- Open PR — `GET /repos/{TRACKED_REPO}/pulls?state=open&base={RELEASE_BRANCH}`
+- Merged — recent commits on `RELEASE_BRANCH` with no active workflow run
+- Building — those recent commits that *do* have a queued / in-progress
+  `GET /actions/runs` entry
+
+The iOS and Android lanes still come from the mock until their adapters are
+wired up. Landing spots:
+
+- `src/lib/data/appstore.ts` — TODO: TestFlight builds + App Store version
+  states from App Store Connect.
+- `src/lib/data/googleplay.ts` — TODO: Play Console tracks + rollout fractions.
+
+`src/lib/data/index.ts` is the single composition point — when those adapters
+land, swap the `iosLaneFallback` / `androidLaneFallback` calls for the real
+ones.
 
 ## Project layout
 
