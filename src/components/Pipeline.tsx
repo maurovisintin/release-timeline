@@ -4,7 +4,14 @@ import useSWR from "swr";
 import type { Pipeline as PipelineT } from "@/lib/types";
 import { Lane } from "@/components/Lane";
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json() as Promise<PipelineT>);
+const fetcher = async (url: string): Promise<PipelineT> => {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`pipeline fetch ${res.status}: ${body.slice(0, 200)}`);
+  }
+  return (await res.json()) as PipelineT;
+};
 
 export function Pipeline({ fallback }: { fallback: PipelineT }) {
   const { data, error, isValidating } = useSWR<PipelineT>("/api/pipeline", fetcher, {
@@ -13,7 +20,10 @@ export function Pipeline({ fallback }: { fallback: PipelineT }) {
     revalidateOnFocus: true,
   });
 
-  const pipeline = data ?? fallback;
+  // Guard against a malformed response shape — fall back to the server-rendered
+  // pipeline rather than crashing on `lanes.map`.
+  const pipeline: PipelineT =
+    data && Array.isArray((data as PipelineT).lanes) ? data : fallback;
 
   return (
     <div className="flex flex-col gap-6">
