@@ -31,6 +31,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     error: "/unauthorized",
   },
   callbacks: {
+    authorized({ auth, request }) {
+      const { pathname } = request.nextUrl;
+      if (pathname.startsWith("/api/auth")) return true;
+      if (pathname === "/signin" || pathname.startsWith("/signin/")) return true;
+      if (pathname === "/unauthorized" || pathname.startsWith("/unauthorized/"))
+        return true;
+      // Anything else — including / and /api/pipeline — requires a session.
+      return !!auth;
+    },
     async signIn({ account, profile }) {
       if (account?.provider !== "github") return false;
       if (!ALLOWED_ORG) {
