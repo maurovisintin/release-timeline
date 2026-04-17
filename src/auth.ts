@@ -6,6 +6,12 @@ const ALLOWED_ORG = process.env.ALLOWED_GITHUB_ORG ?? "";
 declare module "next-auth" {
   interface Session {
     login?: string;
+    // NOTE: the viewer's GitHub OAuth access token is exposed on the session so
+    // server components can call the GitHub API as the signed-in user. It is
+    // THE VIEWER'S OWN TOKEN, scoped to read:org + repo + user:email. Sessions
+    // are httpOnly cookies so it isn't reachable from the browser, but a server
+    // component or route handler rendering for this user can read it here.
+    accessToken?: string;
   }
 }
 
@@ -14,7 +20,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     GitHub({
       clientId: process.env.AUTH_GITHUB_ID,
       clientSecret: process.env.AUTH_GITHUB_SECRET,
-      authorization: { params: { scope: "read:org read:user user:email" } },
+      // `repo` is the classic OAuth scope that grants read access to private
+      // repositories (needed to list PRs, commits, and workflow runs on the
+      // tracked mobile-app repo if it's private).
+      authorization: { params: { scope: "read:org read:user user:email repo" } },
     }),
   ],
   pages: {
@@ -22,6 +31,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     error: "/unauthorized",
   },
   callbacks: {
+    authorized({ auth, request }) {
+      const { pathname } = request.nextUrl;
+      if (pathname.startsWith("/api/auth")) return true;
+      if (pathname === "/signin" || pathname.startsWith("/signin/")) return true;
+      if (pathname === "/unauthorized" || pathname.startsWith("/unauthorized/"))
+        return true;
+      // Anything else — including / and /api/pipeline — requires a session.
+      return !!auth;
+    },
     async signIn({ account, profile }) {
       if (account?.provider !== "github") return false;
       if (!ALLOWED_ORG) {
@@ -49,7 +67,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           (o) => o.login.toLowerCase() === ALLOWED_ORG.toLowerCase(),
         );
         if (!allowed) return "/unauthorized";
-        // Stash the GitHub login on the profile so the jwt callback can pick it up.
         (profile as { login?: string } | undefined) &&
           ((profile as { login?: string }).login =
             (profile as { login?: string }).login ?? undefined);
@@ -59,15 +76,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return false;
       }
     },
-    async jwt({ token, profile }) {
+    async jwt({ token, profile, account }) {
       if (profile && typeof (profile as { login?: unknown }).login === "string") {
         (token as { login?: string }).login = (profile as { login: string }).login;
+      }
+      // Persist the GitHub OAuth access token on first sign-in. GitHub OAuth
+      // tokens don't currently expire, so we only write it when `account` is
+      // present (i.e. on the initial sign-in callback).
+      if (account?.access_token) {
+        (token as { accessToken?: string }).accessToken = account.access_token;
       }
       return token;
     },
     async session({ session, token }) {
       const login = (token as { login?: string }).login;
       if (login) session.login = login;
+      const accessToken = (token as { accessToken?: string }).accessToken;
+      if (accessToken) session.accessToken = accessToken;
       return session;
     },
   },

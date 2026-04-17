@@ -3,11 +3,14 @@ import { Github } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-export default function SignInPage({
+export default async function SignInPage({
   searchParams,
 }: {
   searchParams: Promise<{ callbackUrl?: string }>;
 }) {
+  const { callbackUrl } = (await searchParams) ?? {};
+  const redirectTo = callbackUrl && callbackUrl.startsWith("/") ? callbackUrl : "/";
+
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-sm rounded-lg border border-zinc-900 bg-zinc-950/60 p-6">
@@ -18,8 +21,7 @@ export default function SignInPage({
         <form
           action={async () => {
             "use server";
-            const params = await searchParams;
-            await signIn("github", { redirectTo: params?.callbackUrl ?? "/" });
+            await signIn("github", { redirectTo });
           }}
           className="mt-5"
         >
